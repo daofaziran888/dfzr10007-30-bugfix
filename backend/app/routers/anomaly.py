@@ -12,8 +12,19 @@ router = APIRouter(prefix="/api/anomaly", tags=["指标异动归因"])
 
 service = AnomalyService()
 
-LIST_FIELDS = ["记录编号", "指标名称", "异动方向", "异动幅度", "归因维度", "归因结论", "处理建议", "异动时间"]
+LIST_FIELDS = [
+    "记录编号", "指标名称", "异动方向", "异动幅度", "归因维度", "归因结论",
+    "处理建议", "异动时间", "规则编号", "规则状态", "通知渠道", "静默周期",
+    "告警状态", "静默状态", "静默剩余分钟",
+]
 STATUSES = ["待分析", "分析中", "已归因", "已关闭"]
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出指标异动归因清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "anomaly", "total": total, "items": items}
 
 
 @router.get("", response_model=PageResult[dict])
@@ -51,15 +62,8 @@ def create_entry(payload: EntryPayload) -> ActionResult:
 @router.post("/{entry_id}/actions", response_model=ActionResult)
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     """对单条异动记录执行开始分析、确认归因、关闭异动；不允许的动作会被拦下并说明原因。"""
-    action = str(payload.values.get("action") or "").strip()
+    action = str(payload.action or payload.values.get("action") or "").strip()
     entry, message = service.run_action(entry_id, action)
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出指标异动归因清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "anomaly", "total": total, "items": items}

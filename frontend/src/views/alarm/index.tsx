@@ -7,11 +7,30 @@ const columns = [
   "规则编号",
   "监控指标",
   "告警条件",
+  "通知渠道",
+  "静默周期",
+  "规则状态",
+  "触发结果",
+  "静默状态"
+]
+const detailFields = [
+  "规则编号",
+  "监控指标",
+  "告警条件",
   "告警级别",
   "通知渠道",
   "静默周期",
   "生效时段",
-  "规则状态"
+  "规则状态",
+  "触发结果",
+  "静默状态",
+  "静默剩余分钟",
+  "静默截止时间",
+  "最近触发时间",
+  "最近触发记录",
+  "触发次数",
+  "条件求值结果",
+  "触发说明"
 ]
 const actions = [
   "启用规则",
@@ -24,29 +43,28 @@ const statuses = [
   "已暂停",
   "已关闭"
 ]
-const stats = [
-  {
-    "label": "告警规则总数",
-    "value": 0
-  },
-  {
-    "label": "已启用规则",
-    "value": 0
-  },
-  {
-    "label": "已暂停规则",
-    "value": 0
-  }
-]
 
-type Row = Record<string, string | number | null>
+type Row = Record<string, string | number | null | boolean | string[]>
+
+function display(value: Row[string]): string {
+  if (value === null || value === undefined || value === '') return '—'
+  if (Array.isArray(value)) return value.length ? value.join('、') : '—'
+  return String(value)
+}
 
 export default function AlarmView() {
   const [rows, setRows] = useState<Row[]>([])
   const [total, setTotal] = useState(0)
   const [errorMessage, setErrorMessage] = useState('')
   const [filters, setFilters] = useState<Record<string, string>>({})
-  const filterFields = useMemo(() => columns.slice(0, 3), [])
+  const [detail, setDetail] = useState<Row | null>(null)
+  const filterFields = useMemo(() => ["规则编号", "监控指标", "告警条件"], [])
+
+  const stats = useMemo(() => [
+    { label: '告警规则总数', value: total },
+    { label: '已启用规则', value: rows.filter((row) => row["规则状态"] === '已启用').length },
+    { label: '静默中规则', value: rows.filter((row) => row["静默状态"] === '静默中').length },
+  ], [rows, total])
 
   const reload = useCallback(async () => {
     setErrorMessage('')
@@ -78,9 +96,24 @@ export default function AlarmView() {
       if (!response.ok) {
         throw new Error('分析告警规则动作未生效，请稍后重试')
       }
+      const payload = await response.json()
+      if (!payload.ok) {
+        setErrorMessage(String(payload.message ?? '分析告警规则动作未生效'))
+      }
       await reload()
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '分析告警规则操作失败')
+    }
+  }
+
+  async function openDetail(row: Row) {
+    setErrorMessage('')
+    try {
+      const response = await request(`${ENDPOINT}/${row.id}`)
+      if (!response.ok) throw new Error('告警规则详情读取失败')
+      setDetail(await response.json())
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '告警规则详情读取失败')
     }
   }
 
@@ -89,7 +122,7 @@ export default function AlarmView() {
       <header className="page-head">
         <div>
           <h2>分析告警规则管理</h2>
-          <p className="page-desc">维护分析告警的监控指标、触发条件与通知策略，为分析告警规则提供可验证的数据工程流程。</p>
+          <p className="page-desc">维护分析告警的监控指标、触发条件与通知策略；规则状态、触发结果与静默周期状态在此保持一致。</p>
         </div>
         <div className="page-actions">
           <button className="btn primary" type="button" onClick={() => setErrorMessage('告警规则登记入口尚未接入审批流')}>
@@ -121,6 +154,16 @@ export default function AlarmView() {
             />
           </label>
         ))}
+        <label className="filter-item">
+          <span>规则状态</span>
+          <select
+            value={filters.status ?? ''}
+            onChange={(event) => setFilters((prev) => ({ ...prev, status: event.target.value }))}
+          >
+            <option value="">全部</option>
+            {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+          </select>
+        </label>
         <button className="btn" type="submit">查询</button>
         <button className="btn ghost" type="button" onClick={() => setFilters({})}>重置条件</button>
       </form>
@@ -135,13 +178,18 @@ export default function AlarmView() {
         <tbody>
           {rows.map((row) => (
             <tr key={String(row.id)}>
-              {columns.map((column) => <td key={column}>{row[column] ?? '—'}</td>)}
+              {columns.map((column) => (
+                <td key={column} className={column === '静默状态' && row[column] === '静默中' ? 'state-silenced' : undefined}>
+                  {display(row[column])}
+                </td>
+              ))}
               <td className="row-actions">
                 {actions.map((action) => (
                   <button key={action} className="link" type="button" onClick={() => void runAction(action, row)}>
                     {action}
                   </button>
                 ))}
+                <button className="link" type="button" onClick={() => void openDetail(row)}>查看详情</button>
               </td>
             </tr>
           ))}
@@ -152,6 +200,23 @@ export default function AlarmView() {
           )}
         </tbody>
       </table>
+
+      {detail && (
+        <aside className="detail-panel" data-panel="alarm-detail">
+          <header className="detail-head">
+            <h3>告警规则详情 · {display(detail["规则编号"])}</h3>
+            <button className="btn ghost" type="button" onClick={() => setDetail(null)}>关闭</button>
+          </header>
+          <dl className="detail-grid">
+            {detailFields.map((field) => (
+              <div key={field} className="detail-item">
+                <dt>{field}</dt>
+                <dd>{display(detail[field])}</dd>
+              </div>
+            ))}
+          </dl>
+        </aside>
+      )}
 
       <footer className="page-foot">
         <span>共 {total} 条分析告警规则记录</span>
